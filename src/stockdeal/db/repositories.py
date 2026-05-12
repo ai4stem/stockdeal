@@ -1,9 +1,10 @@
-"""Upsert helpers for core tables (raw SQL to avoid ORM model boilerplate)."""
+"""Upsert + read helpers for core tables (raw SQL to avoid ORM model boilerplate)."""
 from __future__ import annotations
 
+from datetime import date, datetime, timedelta
 from typing import Iterable
 
-from sqlalchemy import text
+from sqlalchemy import bindparam, text
 
 from stockdeal.db.connection import get_session
 
@@ -115,3 +116,73 @@ def upsert_daily_bars(bars: Iterable[dict]) -> int:
     with get_session() as session:
         session.execute(sql, rows)
     return len(rows)
+
+
+# ----------------------------------------------------------------------
+# Read helpers (used by the daily report)
+# ----------------------------------------------------------------------
+def get_latest_bars(tickers: list[str], days: int = 7) -> dict[str, list[dict]]:
+    """Return {ticker: [bar, ...]} sorted ascending by trade_date.
+
+    `days` is calendar days; rows naturally skip weekends/holidays.
+    """
+    if not tickers:
+        return {}
+    sql = text(
+        """
+        SELECT ticker, trade_date, open, high, low, close, volume
+        FROM bar_daily
+        WHERE ticker IN :tickers AND trade_date >= :since
+        ORDER BY ticker, trade_date
+        """
+    ).bindparams(bindparam("tickers", expanding=True))
+    since = date.today() - timedelta(days=days * 2)
+    out: dict[str, list[dict]] = {t: [] for t in tickers}
+    with get_session() as session:
+        for row in session.execute(sql, {"tickers": tickers, "since": since}).mappings():
+            out[row["ticker"]].append(dict(row))
+    return out
+
+
+def get_disclosures_in_range(start: datetime, end: datetime) -> list[dict]:
+    sql = text(
+        """
+        SELECT d.rcept_no, d.ticker, t.name AS ticker_name, d.filed_at,
+               d.report_type, d.title, d.url, d.importance
+        FROM disclosure d
+        LEFT JOIN ticker t ON t.ticker = d.ticker
+        WHERE d.filed_at >= :start AND d.filed_at < :end
+        ORDER BY d.filed_at DESC
+        """
+    )
+    with get_session() as session:
+        return [dict(r) for r in session.execute(sql, {"start": start, "end": end}).mappings()]
+
+
+def get_recent_signals(since: datetime, limit: int = 50) -> list[dict]:
+    sql = text(
+        """
+        SELECT signal_id, ticker, ts, strategy, action, confidence, horizon, reasoning_text
+        FROM signal
+        WHERE ts >= :since
+        ORDER BY ts DESC
+        LIMIT :limit
+        """
+    )
+    with get_session() as session:
+        return [dict(r) for r in session.execute(sql, {"since": since, "limit": limit}).mappings()]
+
+
+def get_recent_trades(book: str, since: datetime, limit: int = 100) -> list[dict]:
+    table = "trade_real" if book.upper() == "REAL" else "trade_paper"
+    sql = text(
+        f"""
+        SELECT signal_id, ticker, side, qty, fill_price, fill_qty, fill_ts, pnl
+        FROM {table}
+        WHERE fill_ts >= :since
+        ORDER BY fill_ts DESC
+        LIMIT :limit
+        """
+    )
+    with get_session() as session:
+        return [dict(r) for r in session.execute(sql, {"since": since, "limit": limit}).mappings()]

@@ -50,14 +50,41 @@ def worker() -> None:
 
 
 @app.command()
-def report() -> None:
-    """Build and email today's daily report."""
-    from datetime import date
+def report(
+    on: str = typer.Option(
+        "", help="Report date YYYY-MM-DD (default: today)"
+    ),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Render only; do not send the email"
+    ),
+    out: Path = typer.Option(
+        Path("daily_report.html"), help="Where to write the HTML in --dry-run mode"
+    ),
+) -> None:
+    """Build today's daily report and send via Gmail (or render only with --dry-run)."""
+    from datetime import date as _date, datetime as _dt
 
-    from stockdeal.reports.daily import send_daily
+    from stockdeal.reports.daily import (
+        build_report,
+        render_html,
+        render_plain_text,
+        render_subject,
+        send_daily,
+    )
 
     configure_logging()
-    send_daily(date.today())
+    target = _dt.strptime(on, "%Y-%m-%d").date() if on else _date.today()
+
+    if dry_run:
+        report_obj = build_report(target)
+        html = render_html(report_obj)
+        text = render_plain_text(report_obj)
+        out.write_text(html, encoding="utf-8")
+        rprint(f"[green]rendered -> {out}[/green]  subject: {render_subject(report_obj)}")
+        rprint(text)
+        return
+
+    send_daily(target)
 
 
 @app.command(name="db-init")

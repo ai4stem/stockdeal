@@ -14,36 +14,151 @@
     .up { color: #d83a3a; }
     .down { color: #1f5fd6; }
     .muted { color: #888; }
-    .news-item { margin: 8px 0; padding: 8px; border-left: 3px solid #ccc; }
-    .news-item.high { border-left-color: #d83a3a; }
-    .news-item .title { font-weight: 600; }
-    .news-item .summary { color: #555; font-size: 13px; }
+    a { color: #2a6df4; text-decoration: none; }
+    a:hover { text-decoration: underline; }
   </style>
 </head>
 <body>
   <h1>📈 Daily Report — {{ report.report_date }}</h1>
 
-  <h2>1. 시장 요약</h2>
-  {# TODO: render report.sections.market_summary #}
+  <h2>1. 관심종목 현황</h2>
+  {% if report.watchlist %}
+  <table>
+    <thead>
+      <tr>
+        <th class="left">종목</th>
+        <th>종가</th>
+        <th>대비</th>
+        <th>등락률</th>
+        <th>5일 추세</th>
+        <th>거래량</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for w in report.watchlist %}
+      <tr>
+        <td class="left">{{ w.ticker }}</td>
+        {% if w.close is none %}
+          <td colspan="5" class="muted left">데이터 없음</td>
+        {% else %}
+          <td>{{ "{:,}".format(w.close) }}</td>
+          <td class="{{ 'up' if (w.change or 0) >= 0 else 'down' }}">
+            {% if w.change is not none %}{{ "{:+,}".format(w.change) }}{% else %}-{% endif %}
+          </td>
+          <td class="{{ 'up' if (w.change_pct or 0) >= 0 else 'down' }}">
+            {% if w.change_pct is not none %}{{ "{:+.2f}%".format(w.change_pct) }}{% else %}-{% endif %}
+          </td>
+          <td class="{{ 'up' if (w.trend_5d_pct or 0) >= 0 else 'down' }}">
+            {% if w.trend_5d_pct is not none %}{{ "{:+.2f}%".format(w.trend_5d_pct) }}{% else %}-{% endif %}
+          </td>
+          <td>{{ "{:,}".format(w.volume or 0) }}</td>
+        {% endif %}
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="muted">데이터 없음</p>
+  {% endif %}
 
-  <h2>2. 관심종목 현황</h2>
-  {# TODO: render report.sections.watchlist_table #}
+  <h2>2. 오늘의 공시 ({{ report.disclosures|length }}건)</h2>
+  {% if report.disclosures %}
+  <ul>
+    {% for d in report.disclosures %}
+    <li>
+      <strong>{{ d.filed_at.strftime('%H:%M') }}</strong>
+      [{{ d.ticker }} {{ d.ticker_name or '' }}]
+      <a href="{{ d.url }}">{{ d.title }}</a>
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p class="muted">신규 공시 없음</p>
+  {% endif %}
 
-  <h2>3. 펀더멘털 · 공시 이벤트</h2>
-  {# TODO: render report.sections.disclosures #}
+  <h2>3. 매크로 동향</h2>
+  <p class="muted">(다음 라운드에서 FRED/ECOS 적재 후 채움)</p>
 
-  <h2>4. 매크로 동향</h2>
-  {# TODO: render report.sections.macro #}
+  <h2>4. 뉴스 하이라이트</h2>
+  <p class="muted">(다음 라운드에서 뉴스 수집기 + LLM 분류 후 채움)</p>
 
-  <h2>5. 뉴스 하이라이트</h2>
-  {# TODO: render report.sections.top_news #}
+  <h2>5. 시그널 ({{ report.signals|length }}건)</h2>
+  {% if report.signals %}
+  <table>
+    <thead>
+      <tr>
+        <th class="left">시간</th>
+        <th class="left">종목</th>
+        <th class="left">전략</th>
+        <th class="left">액션</th>
+        <th>신뢰도</th>
+        <th class="left">근거</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for s in report.signals %}
+      <tr>
+        <td class="left">{{ s.ts.strftime('%H:%M') }}</td>
+        <td class="left">{{ s.ticker }}</td>
+        <td class="left">{{ s.strategy }}</td>
+        <td class="left">{{ s.action }}</td>
+        <td>{{ "{:.2f}".format(s.confidence or 0) }}</td>
+        <td class="left">{{ (s.reasoning_text or '')[:120] }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="muted">발생 시그널 없음</p>
+  {% endif %}
 
-  <h2>6. 시그널 & 포지션 (Paper vs Real)</h2>
-  {# TODO: render report.sections.signals + report.sections.positions #}
+  <h2>6. 매매 내역 (Paper vs Real)</h2>
+  <p>Paper: {{ report.trades_paper|length }}건 · Real: {{ report.trades_real|length }}건</p>
+  {% if report.trades_paper or report.trades_real %}
+  <table>
+    <thead>
+      <tr>
+        <th class="left">Book</th>
+        <th class="left">시간</th>
+        <th class="left">종목</th>
+        <th class="left">방향</th>
+        <th>수량</th>
+        <th>체결가</th>
+        <th>손익</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for t in report.trades_paper %}
+      <tr>
+        <td class="left">PAPER</td>
+        <td class="left">{{ t.fill_ts.strftime('%H:%M:%S') }}</td>
+        <td class="left">{{ t.ticker }}</td>
+        <td class="left">{{ t.side }}</td>
+        <td>{{ t.fill_qty }}</td>
+        <td>{{ "{:,}".format(t.fill_price|int) }}</td>
+        <td class="{{ 'up' if (t.pnl or 0) >= 0 else 'down' }}">{{ "{:+,}".format(t.pnl|int) if t.pnl is not none else '-' }}</td>
+      </tr>
+      {% endfor %}
+      {% for t in report.trades_real %}
+      <tr>
+        <td class="left"><strong>REAL</strong></td>
+        <td class="left">{{ t.fill_ts.strftime('%H:%M:%S') }}</td>
+        <td class="left">{{ t.ticker }}</td>
+        <td class="left">{{ t.side }}</td>
+        <td>{{ t.fill_qty }}</td>
+        <td>{{ "{:,}".format(t.fill_price|int) }}</td>
+        <td class="{{ 'up' if (t.pnl or 0) >= 0 else 'down' }}">{{ "{:+,}".format(t.pnl|int) if t.pnl is not none else '-' }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="muted">오늘 체결 없음</p>
+  {% endif %}
 
   <h2>7. 내일 점검 포인트</h2>
-  {# TODO: render report.sections.tomorrow #}
+  <p class="muted">(이후 매크로 캘린더 + Claude 시나리오 채움)</p>
 
-  <p class="muted">Generated at {{ report.report_date }} — stockdeal</p>
+  <p class="muted">Generated {{ report.report_date }} — stockdeal</p>
 </body>
 </html>
