@@ -24,7 +24,9 @@ from stockdeal.logging import configure_logging, get_logger
 
 app = typer.Typer(add_completion=False, no_args_is_help=True)
 kis_app = typer.Typer(add_completion=False, no_args_is_help=True, help="KIS OpenAPI helpers")
+dart_app = typer.Typer(add_completion=False, no_args_is_help=True, help="Open DART helpers")
 app.add_typer(kis_app, name="kis")
+app.add_typer(dart_app, name="dart")
 log = get_logger(__name__)
 
 
@@ -180,6 +182,185 @@ def kis_ingest(days: int = typer.Option(60, help="History window per ticker")) -
 
     summary = asyncio.run(_run())
     rprint(json.dumps(summary, indent=2))
+
+
+CORP_CODE_CACHE = Path(".dart_corp_code.json")
+
+
+def _load_corp_map() -> dict[str, dict]:
+    if not CORP_CODE_CACHE.exists():
+        raise typer.BadParameter(
+            "DART corp_code cache missing. Run `stockdeal dart bootstrap` first."
+        )
+    return json.loads(CORP_CODE_CACHE.read_text())
+
+
+@dart_app.command("bootstrap")
+def dart_bootstrap(
+    update_watchlist: bool = typer.Option(
+        True, help="Also write corp_code into ticker rows for the watchlist"
+    ),
+) -> None:
+    """Download DART corp_code mapping and cache it locally."""
+    from stockdeal.collectors.dart import DartClient
+    from stockdeal.db.repositories import set_ticker_corp_code, upsert_ticker
+
+    configure_logging()
+    s = get_settings()
+
+    async def _run() -> list[dict]:
+        client = DartClient()
+        try:
+            zip_bytes = await client.fetch_corp_code_zip()
+        finally:
+            await client.aclose()
+        return DartClient.parse_corp_code_xml(zip_bytes)
+
+    rows = asyncio.run(_run())
+    by_stock = {r["stock_code"]: r for r in rows}
+    CORP_CODE_CACHE.write_text(json.dumps(by_stock, ensure_ascii=False))
+    rprint(f"[green]cached {len(by_stock)} listed firms -> {CORP_CODE_CACHE}[/green]")
+
+    if update_watchlist:
+        for ticker in s.watchlist_tickers:
+            info = by_stock.get(ticker)
+            if not info:
+                rprint(f"[yellow]watchlist ticker {ticker} not found in DART map[/yellow]")
+                continue
+            affected = set_ticker_corp_code(ticker, info["corp_code"])
+            if affected == 0:
+                upsert_ticker(
+                    ticker=ticker,
+                    name=info["corp_name"],
+                    market="UNKNOWN",
+                    corp_code=info["corp_code"],
+                    is_watchlist=True,
+                )
+            rprint(f"  {ticker} {info['corp_name']} -> corp_code={info['corp_code']}")
+
+
+@dart_app.command("disclosures")
+def dart_disclosures(
+    ticker: str,
+    days: int = typer.Option(30, help="Look back this many days"),
+    save: bool = typer.Option(False, help="Upsert results into the disclosure table"),
+) -> None:
+    """List recent disclosures for TICKER (uses cached corp_code mapping)."""
+    from datetime import date, timedelta
+
+    from stockdeal.collectors.dart import DartClient, disclosure_url, parse_rcept_dt
+    from stockdeal.db.repositories import upsert_disclosure
+
+    configure_logging()
+    corp_map = _load_corp_map()
+    if ticker not in corp_map:
+        raise typer.BadParameter(f"ticker {ticker} not in DART corp_code cache")
+    corp_code = corp_map[ticker]["corp_code"]
+    end = date.today()
+    bgn = end - timedelta(days=days)
+
+    async def _run() -> list[dict]:
+        client = DartClient()
+        try:
+            return await client.list_disclosures(corp_code, bgn_de=bgn, end_de=end)
+        finally:
+            await client.aclose()
+
+    items = asyncio.run(_run())
+
+    table = Table(title=f"{ticker} disclosures ({bgn}~{end}) — {len(items)} rows")
+    for col in ("rcept_dt", "report_nm", "rcept_no"):
+        table.add_column(col)
+    for it in items[:30]:
+        table.add_row(it["rcept_dt"], it["report_nm"], it["rcept_no"])
+    rprint(table)
+
+    if save:
+        saved = 0
+        for it in items:
+            upsert_disclosure(
+                {
+                    "rcept_no": it["rcept_no"],
+                    "ticker": ticker,
+                    "corp_code": corp_code,
+                    "filed_at": parse_rcept_dt(it["rcept_dt"]),
+                    "report_type": it.get("report_nm"),
+                    "title": it.get("report_nm"),
+                    "url": disclosure_url(it["rcept_no"]),
+                }
+            )
+            saved += 1
+        log.info("disclosure_upserted", ticker=ticker, rows=saved)
+
+
+@dart_app.command("financials")
+def dart_financials(
+    ticker: str,
+    year: int = typer.Option(..., help="Business year, e.g. 2024"),
+    report: str = typer.Option("ANNUAL", help="Q1 | HALF | Q3 | ANNUAL"),
+    fs: str = typer.Option("OFS", help="OFS=별도, CFS=연결"),
+    save: bool = typer.Option(False, help="Upsert results into company_financial"),
+) -> None:
+    """Fetch annual / quarterly financials for TICKER."""
+    from stockdeal.collectors.dart import (
+        REPORT_CODES,
+        DartClient,
+        period_end_for,
+        period_type_for,
+    )
+    from stockdeal.db.repositories import upsert_company_financials
+
+    configure_logging()
+    if report not in REPORT_CODES:
+        raise typer.BadParameter(f"report must be one of {list(REPORT_CODES)}")
+    reprt_code = REPORT_CODES[report]
+    corp_map = _load_corp_map()
+    if ticker not in corp_map:
+        raise typer.BadParameter(f"ticker {ticker} not in DART corp_code cache")
+    corp_code = corp_map[ticker]["corp_code"]
+
+    async def _run() -> list[dict]:
+        client = DartClient()
+        try:
+            return await client.fetch_financial_statements(
+                corp_code, bsns_year=year, reprt_code=reprt_code, fs_div=fs
+            )
+        finally:
+            await client.aclose()
+
+    accounts = asyncio.run(_run())
+
+    table = Table(title=f"{ticker} {year} {report} {fs} — {len(accounts)} accounts")
+    for col in ("sj_div", "account_nm", "thstrm_amount"):
+        table.add_column(col)
+    for a in accounts[:30]:
+        table.add_row(a.get("sj_div", ""), a.get("account_nm", ""), a.get("thstrm_amount", ""))
+    rprint(table)
+
+    if save:
+        period_end = period_end_for(reprt_code, year)
+        period_type = period_type_for(reprt_code)
+        rows = []
+        for a in accounts:
+            amount = a.get("thstrm_amount", "").replace(",", "").strip()
+            try:
+                value = float(amount) if amount and amount != "-" else None
+            except ValueError:
+                value = None
+            rows.append(
+                {
+                    "ticker": ticker,
+                    "period_end": period_end,
+                    "period_type": period_type,
+                    "account_code": (a.get("account_id") or a.get("account_nm") or "")[:32],
+                    "account_name": a.get("account_nm", "")[:128],
+                    "value": value,
+                    "unit": a.get("currency", "KRW"),
+                    "source_rcept_no": a.get("rcept_no"),
+                }
+            )
+        n = upsert_company_financials(rows)
+        log.info("financials_upserted", ticker=ticker, rows=n)
 
 
 if __name__ == "__main__":

@@ -220,3 +220,4 @@ __marimo__/
 # stockdeal local caches
 .kis_token.json
 .kakao_token.json
+.dart_corp_code.json

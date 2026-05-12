@@ -42,6 +42,56 @@ def upsert_ticker(
         )
 
 
+def set_ticker_corp_code(ticker: str, corp_code: str) -> int:
+    """Update corp_code on an existing ticker row. Returns rows affected."""
+    sql = text(
+        "UPDATE ticker SET corp_code = :corp_code WHERE ticker = :ticker"
+    )
+    with get_session() as session:
+        result = session.execute(sql, {"ticker": ticker, "corp_code": corp_code})
+        return result.rowcount or 0
+
+
+def upsert_disclosure(row: dict) -> None:
+    """Upsert a single disclosure record (no summary/importance yet)."""
+    sql = text(
+        """
+        INSERT INTO disclosure
+            (rcept_no, ticker, corp_code, filed_at, report_type, title, url)
+        VALUES
+            (:rcept_no, :ticker, :corp_code, :filed_at, :report_type, :title, :url)
+        ON DUPLICATE KEY UPDATE
+            title = VALUES(title),
+            report_type = VALUES(report_type),
+            url = VALUES(url)
+        """
+    )
+    with get_session() as session:
+        session.execute(sql, row)
+
+
+def upsert_company_financials(rows: Iterable[dict]) -> int:
+    sql = text(
+        """
+        INSERT INTO company_financial
+            (ticker, period_end, period_type, account_code, account_name, value, unit, source_rcept_no)
+        VALUES
+            (:ticker, :period_end, :period_type, :account_code, :account_name, :value, :unit, :source_rcept_no)
+        ON DUPLICATE KEY UPDATE
+            account_name = VALUES(account_name),
+            value = VALUES(value),
+            unit = VALUES(unit),
+            source_rcept_no = VALUES(source_rcept_no)
+        """
+    )
+    rows_list = list(rows)
+    if not rows_list:
+        return 0
+    with get_session() as session:
+        session.execute(sql, rows_list)
+    return len(rows_list)
+
+
 def upsert_daily_bars(bars: Iterable[dict]) -> int:
     """Upsert into bar_daily. Returns number of rows passed in."""
     sql = text(
