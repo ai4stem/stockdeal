@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <title>Daily Report {{ report.report_date }}</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; color: #222; max-width: 760px; margin: 24px auto; padding: 0 16px; }
+    h1 { font-size: 22px; border-bottom: 2px solid #333; padding-bottom: 6px; }
+    h2 { font-size: 17px; margin-top: 24px; border-left: 4px solid #2a6df4; padding-left: 8px; }
+    table { width: 100%; border-collapse: collapse; margin: 10px 0; font-size: 13px; }
+    th, td { border: 1px solid #ddd; padding: 6px 8px; text-align: right; }
+    th { background: #f6f8fa; }
+    td.left, th.left { text-align: left; }
+    .up { color: #d83a3a; }
+    .down { color: #1f5fd6; }
+    .muted { color: #888; }
+    .news-item { margin: 8px 0; padding: 8px; border-left: 3px solid #ccc; }
+    .news-item.high { border-left-color: #d83a3a; }
+    .news-item .title { font-weight: 600; }
+    .news-item .summary { color: #555; font-size: 13px; }
+  </style>
+</head>
+<body>
+  <h1>📈 Daily Report — {{ report.report_date }}</h1>
+
+  <h2>1. 시장 요약</h2>
+  {# TODO: render report.sections.market_summary #}
+
+  <h2>2. 관심종목 현황</h2>
+  {# TODO: render report.sections.watchlist_table #}
+
+  <h2>3. 펀더멘털 · 공시 이벤트</h2>
+  {# TODO: render report.sections.disclosures #}
+
+  <h2>4. 매크로 동향</h2>
+  {# TODO: render report.sections.macro #}
+
+  <h2>5. 뉴스 하이라이트</h2>
+  {# TODO: render report.sections.top_news #}
+
+  <h2>6. 시그널 & 포지션 (Paper vs Real)</h2>
+  {# TODO: render report.sections.signals + report.sections.positions #}
+
+  <h2>7. 내일 점검 포인트</h2>
+  {# TODO: render report.sections.tomorrow #}
+
+  <p class="muted">Generated at {{ report.report_date }} — stockdeal</p>
+</body>
+</html>
