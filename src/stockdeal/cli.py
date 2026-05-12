@@ -25,8 +25,10 @@ from stockdeal.logging import configure_logging, get_logger
 app = typer.Typer(add_completion=False, no_args_is_help=True)
 kis_app = typer.Typer(add_completion=False, no_args_is_help=True, help="KIS OpenAPI helpers")
 dart_app = typer.Typer(add_completion=False, no_args_is_help=True, help="Open DART helpers")
+llm_app = typer.Typer(add_completion=False, no_args_is_help=True, help="Claude LLM helpers")
 app.add_typer(kis_app, name="kis")
 app.add_typer(dart_app, name="dart")
+app.add_typer(llm_app, name="llm")
 log = get_logger(__name__)
 
 
@@ -361,6 +363,60 @@ def dart_financials(
             )
         n = upsert_company_financials(rows)
         log.info("financials_upserted", ticker=ticker, rows=n)
+
+
+@llm_app.command("ask")
+def llm_ask(
+    prompt: str = typer.Argument(..., help="User prompt"),
+    tier: str = typer.Option("fast", help="fast | smart | deep"),
+    system: str = typer.Option(
+        "You are a concise assistant for a Korean semiconductor stock analysis system.",
+        help="System prompt",
+    ),
+    json_mode: bool = typer.Option(False, help="Force JSON output"),
+    max_tokens: int = typer.Option(1024),
+) -> None:
+    """Send a single prompt to Claude at the chosen tier and print the result."""
+    from stockdeal.analysis.llm import ClaudeClient, Tier
+
+    configure_logging()
+    client = ClaudeClient()
+    result = client.ask(
+        tier=Tier(tier),
+        system=system,
+        user=prompt,
+        max_tokens=max_tokens,
+        json_mode=json_mode,
+    )
+    rprint("[bold]model:[/bold]", result.model)
+    rprint("[bold]usage:[/bold]", result.usage)
+    rprint("[bold]stop:[/bold]", result.stop_reason)
+    if json_mode and result.parsed is not None:
+        rprint("[bold]parsed:[/bold]")
+        rprint(result.parsed)
+    rprint("[bold]text:[/bold]")
+    rprint(result.text)
+
+
+@llm_app.command("test")
+def llm_test() -> None:
+    """Smoke-test all three tiers with a trivial prompt."""
+    from stockdeal.analysis.llm import ClaudeClient, Tier
+
+    configure_logging()
+    client = ClaudeClient()
+    for tier in (Tier.FAST, Tier.SMART, Tier.DEEP):
+        result = client.ask(
+            tier=tier,
+            system="Respond with the single word PONG.",
+            user="ping",
+            max_tokens=16,
+            cache_system=False,
+        )
+        rprint(
+            f"[green]{tier.value}[/green] {result.model} -> "
+            f"{result.text!r} (in={result.usage['input_tokens']} out={result.usage['output_tokens']})"
+        )
 
 
 if __name__ == "__main__":
