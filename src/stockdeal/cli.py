@@ -26,9 +26,11 @@ app = typer.Typer(add_completion=False, no_args_is_help=True)
 kis_app = typer.Typer(add_completion=False, no_args_is_help=True, help="KIS OpenAPI helpers")
 dart_app = typer.Typer(add_completion=False, no_args_is_help=True, help="Open DART helpers")
 llm_app = typer.Typer(add_completion=False, no_args_is_help=True, help="Claude LLM helpers")
+news_app = typer.Typer(add_completion=False, no_args_is_help=True, help="News collectors")
 app.add_typer(kis_app, name="kis")
 app.add_typer(dart_app, name="dart")
 app.add_typer(llm_app, name="llm")
+app.add_typer(news_app, name="news")
 log = get_logger(__name__)
 
 
@@ -444,6 +446,88 @@ def llm_test() -> None:
             f"[green]{tier.value}[/green] {result.model} -> "
             f"{result.text!r} (in={result.usage['input_tokens']} out={result.usage['output_tokens']})"
         )
+
+
+def _print_news(items: list, limit: int = 20) -> None:
+    table = Table(title=f"news ({len(items)} items)")
+    for col in ("published", "source", "title"):
+        table.add_column(col, overflow="fold")
+    for it in items[:limit]:
+        pub = it.published_at.isoformat() if it.published_at else "-"
+        table.add_row(pub, it.source, it.title[:100])
+    rprint(table)
+
+
+@news_app.command("naver")
+def news_naver(
+    query: str,
+    display: int = typer.Option(30, help="1~100"),
+    save: bool = typer.Option(False, help="Insert into news_raw"),
+) -> None:
+    """Search Naver news for QUERY."""
+    from stockdeal.collectors.news.naver import NaverNewsClient
+    from stockdeal.db.repositories import upsert_news_items
+
+    configure_logging()
+
+    async def _run() -> list:
+        client = NaverNewsClient()
+        try:
+            return await client.search(query, display=display)
+        finally:
+            await client.aclose()
+
+    items = asyncio.run(_run())
+    _print_news(items)
+    if save:
+        n = upsert_news_items(i.to_row() for i in items)
+        log.info("news_upserted", source="naver", rows=n)
+
+
+@news_app.command("finnhub")
+def news_finnhub(
+    symbol: str,
+    days: int = typer.Option(7, help="Look back N days"),
+    save: bool = typer.Option(False, help="Insert into news_raw"),
+) -> None:
+    """Pull Finnhub company news for SYMBOL (e.g. AAPL, NVDA)."""
+    from datetime import date as _date, timedelta
+
+    from stockdeal.collectors.news.finnhub import FinnhubClient
+    from stockdeal.db.repositories import upsert_news_items
+
+    configure_logging()
+    end = _date.today()
+    start = end - timedelta(days=days)
+
+    async def _run() -> list:
+        client = FinnhubClient()
+        try:
+            return await client.company_news(symbol, start.isoformat(), end.isoformat())
+        finally:
+            await client.aclose()
+
+    items = asyncio.run(_run())
+    _print_news(items)
+    if save:
+        n = upsert_news_items(i.to_row() for i in items)
+        log.info("news_upserted", source="finnhub", rows=n)
+
+
+@news_app.command("rss")
+def news_rss(
+    save: bool = typer.Option(False, help="Insert into news_raw"),
+) -> None:
+    """Poll all configured RSS feeds once."""
+    from stockdeal.collectors.news.rss import RssPoller
+    from stockdeal.db.repositories import upsert_news_items
+
+    configure_logging()
+    items = RssPoller().poll_all()
+    _print_news(items)
+    if save:
+        n = upsert_news_items(i.to_row() for i in items)
+        log.info("news_upserted", source="rss", rows=n)
 
 
 if __name__ == "__main__":

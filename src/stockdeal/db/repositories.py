@@ -71,6 +71,28 @@ def upsert_disclosure(row: dict) -> None:
         session.execute(sql, row)
 
 
+def upsert_news_items(rows: Iterable[dict]) -> int:
+    """Insert news rows; on duplicate url_hash, leave existing row alone."""
+    sql = text(
+        """
+        INSERT INTO news_raw
+            (source, external_id, url, url_hash, title, body, published_at, language)
+        VALUES
+            (:source, :external_id, :url, :url_hash, :title, :body, :published_at, :language)
+        ON DUPLICATE KEY UPDATE
+            title = VALUES(title),
+            body  = COALESCE(VALUES(body), body),
+            published_at = COALESCE(VALUES(published_at), published_at)
+        """
+    )
+    rows_list = list(rows)
+    if not rows_list:
+        return 0
+    with get_session() as session:
+        session.execute(sql, rows_list)
+    return len(rows_list)
+
+
 def upsert_company_financials(rows: Iterable[dict]) -> int:
     sql = text(
         """
