@@ -1,0 +1,102 @@
+[project]
+name = "stockdeal"
+version = "0.1.0"
+description = "Semiconductor stock analysis & trading system (Peter Lynch + LLM + DL)"
+requires-python = ">=3.11"
+readme = "README.md"
+
+dependencies = [
+    # HTTP / async
+    "httpx>=0.27",
+    "websockets>=12.0",
+    "tenacity>=8.5",
+
+    # Config / data
+    "pydantic>=2.7",
+    "pydantic-settings>=2.3",
+    "python-dotenv>=1.0",
+
+    # DB
+    "sqlalchemy>=2.0",
+    "pymysql>=1.1",
+    "cryptography>=42.0",
+    "alembic>=1.13",
+
+    # Data / numerics
+    "pandas>=2.2",
+    "numpy>=1.26",
+    "polars>=1.0",
+    "pyarrow>=16.0",
+
+    # TA
+    "pandas-ta>=0.3.14b",
+
+    # ML / DL (CPU baseline; CUDA torch installed separately if needed)
+    "scikit-learn>=1.5",
+    "xgboost>=2.1",
+    "lightgbm>=4.4",
+
+    # LLM
+    "anthropic>=0.39",
+
+    # Scheduling / serving
+    "apscheduler>=3.10",
+    "fastapi>=0.112",
+    "uvicorn[standard]>=0.30",
+
+    # Notifications
+    "python-telegram-bot>=21.4",
+    "jinja2>=3.1",
+
+    # Parsing / scraping
+    "feedparser>=6.0",
+    "beautifulsoup4>=4.12",
+    "lxml>=5.2",
+
+    # Logging
+    "structlog>=24.4",
+    "rich>=13.7",
+
+    # CLI
+    "typer>=0.12",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3",
+    "pytest-asyncio>=0.23",
+    "ruff>=0.5",
+    "mypy>=1.11",
+    "ipython>=8.26",
+    "jupyter>=1.0",
+    "detect-secrets>=1.5",
+]
+dl = [
+    # Install torch separately matching your CUDA/CPU.
+    # CPU example: pip install torch --index-url https://download.pytorch.org/whl/cpu
+    "lightning>=2.3",
+    "neuralforecast>=1.7",
+    "mlflow>=2.15",
+]
+
+[project.scripts]
+stockdeal = "stockdeal.cli:app"
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "N", "SIM"]
+ignore = ["E501"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]

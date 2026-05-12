@@ -216,3 +216,8 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# stockdeal local caches
+.kis_token.json
+.kakao_token.json
+.dart_corp_code.json
